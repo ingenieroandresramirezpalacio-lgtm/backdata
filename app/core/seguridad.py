@@ -12,9 +12,14 @@ from datetime import UTC, datetime, timedelta
 
 import bcrypt
 import jwt
+from fastapi import Response
 
 from app.core.config import settings
 from app.core.errores import CredencialesInvalidas
+
+# La cookie solo se envia en las rutas de la API, no con los archivos
+# estaticos del frontend: no hay razon para que viaje con cada imagen o CSS.
+_COOKIE_PATH = "/api"
 
 
 def hash_password(password: str) -> str:
@@ -61,3 +66,35 @@ def leer_token_acceso(token: str) -> dict:
         raise CredencialesInvalidas("Tu sesión expiró. Vuelve a iniciar sesión.") from exc
     except jwt.PyJWTError as exc:
         raise CredencialesInvalidas("Tu sesión no es válida. Vuelve a iniciar sesión.") from exc
+
+
+def poner_cookie_sesion(response: Response, token: str, max_age_segundos: int) -> None:
+    """
+    Guarda el token en una cookie de sesion segura:
+
+      HttpOnly       el JavaScript del navegador no puede leerla (anti-XSS).
+      SameSite=Strict solo se envia en peticiones del propio sitio, lo que
+                     corta de raiz los ataques CSRF sin necesidad de un token
+                     extra (la app es de un solo origen).
+      Secure         solo por HTTPS (activo en produccion; ver config).
+    """
+    response.set_cookie(
+        key=settings.cookie_nombre,
+        value=token,
+        max_age=max_age_segundos,
+        httponly=True,
+        secure=settings.cookie_secure,
+        samesite="strict",
+        path=_COOKIE_PATH,
+    )
+
+
+def borrar_cookie_sesion(response: Response) -> None:
+    """Elimina la cookie de sesion (cierre de sesion)."""
+    response.delete_cookie(
+        key=settings.cookie_nombre,
+        path=_COOKIE_PATH,
+        httponly=True,
+        secure=settings.cookie_secure,
+        samesite="strict",
+    )

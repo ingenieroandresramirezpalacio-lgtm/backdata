@@ -13,6 +13,7 @@ error, y nunca le muestra al usuario un rastro tecnico.
 import logging
 
 from fastapi import FastAPI, Request
+from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from sqlalchemy.exc import IntegrityError
@@ -45,7 +46,11 @@ def registrar_manejadores(app: FastAPI) -> None:
             status_code=422,
             content={
                 "detail": f"{campo}: {mensaje}" if campo else mensaje,
-                "errores": exc.errors(),
+                # jsonable_encoder: el detalle de Pydantic puede traer valores
+                # que json.dumps no sabe serializar (por ejemplo un Decimal en
+                # los limites de un campo numerico). Sin esto, el manejador de
+                # errores fallaba y devolvia un 500 en vez del 422.
+                "errores": jsonable_encoder(exc.errors()),
             },
         )
 

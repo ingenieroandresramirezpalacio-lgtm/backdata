@@ -63,9 +63,34 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
-    # Sin esto el navegador no deja leer el nombre del archivo exportado.
-    expose_headers=["Content-Disposition"],
+    # Sin esto el navegador no deja leer el nombre del archivo exportado ni el ID de traza.
+    expose_headers=["Content-Disposition", "X-Request-ID"],
 )
+
+
+@app.middleware("http")
+async def middleware_trazabilidad(request, call_next):
+    import time
+    import uuid
+
+    request_id = request.headers.get("X-Request-ID") or uuid.uuid4().hex[:12]
+    inicio = time.perf_counter()
+    respuesta = await call_next(request)
+    duracion_ms = (time.perf_counter() - inicio) * 1000
+    respuesta.headers["X-Request-ID"] = request_id
+
+    # No ensuciar el log con las revisiones de salud de Docker
+    if not request.url.path.endswith("/salud"):
+        logger.info(
+            "[%s] %s %s -> %d (%.1f ms)",
+            request_id,
+            request.method,
+            request.url.path,
+            respuesta.status_code,
+            duracion_ms,
+        )
+    return respuesta
+
 
 registrar_manejadores(app)
 app.include_router(api_router)

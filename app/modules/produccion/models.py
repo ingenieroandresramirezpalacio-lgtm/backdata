@@ -13,6 +13,7 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     Index,
+    Integer,
     Numeric,
     SmallInteger,
     String,
@@ -132,6 +133,11 @@ class OrdenProduccion(Base):
     cantidad_canastillas_solicitadas: Mapped[Decimal | None] = mapped_column(
         Numeric(10, 2), nullable=True
     )
+
+    # Cuantas horas COMPLETAS se programa mantener la orden en produccion
+    # (minimo 1): en la planta no existen medias horas de produccion.
+    # Es NULL en las ordenes creadas antes de que existiera este dato.
+    horas_produccion: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     destino: Mapped[str] = mapped_column(
         String(20), default=DestinoOrden.NACIONAL, server_default=DestinoOrden.NACIONAL

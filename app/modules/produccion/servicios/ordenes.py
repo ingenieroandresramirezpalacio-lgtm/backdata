@@ -12,6 +12,7 @@ Reglas que viven aqui (confirmadas con la planta, no inventadas):
     se sigue pesando en saborizado.
 """
 
+import logging
 from datetime import UTC, datetime
 from decimal import Decimal
 
@@ -25,6 +26,7 @@ from app.core.tiempo import hoy_local
 from app.modules.catalogos.models import Horno, Producto
 from app.modules.catalogos.service import obtener_configuracion
 from app.modules.identidad.models import RolCodigo, Usuario
+from app.modules.notificaciones import service as notificaciones
 from app.modules.produccion.models import (
     DestinoOrden,
     EstadoOrden,
@@ -35,6 +37,8 @@ from app.modules.produccion.models import (
     UnidadSolicitada,
 )
 from app.modules.produccion.schemas import OrdenGuardar
+
+logger = logging.getLogger("datacontrol")
 
 # --- Consultas -------------------------------------------------------------
 
@@ -100,11 +104,26 @@ def generar_numero_orden(db: Session, fecha) -> str:
 # --- Validaciones compartidas ---------------------------------------------
 
 
+def _validar_horas(datos: OrdenGuardar) -> None:
+    """
+    La orden se programa por HORAS COMPLETAS: en la planta no existen medias
+    horas de produccion (una orden va 1, 2, 3... horas). El tipo entero del
+    schema ya rechaza los decimales; aqui se cuida el minimo de una hora.
+    El mismo limite esta en la base de datos (ck_orden_horas_minimo_una).
+    """
+    if datos.horas_produccion is None:
+        raise ErrorDeValidacion("Debes indicar cuántas horas se va a mandar a producción.")
+    if datos.horas_produccion < 1:
+        raise ErrorDeValidacion("La producción debe programarse por al menos 1 hora completa.")
+
+
 def _validar_catalogos(db: Session, datos: OrdenGuardar) -> tuple[Horno, Producto]:
     if datos.destino not in (DestinoOrden.NACIONAL, DestinoOrden.EXPORTACION):
         raise ErrorDeValidacion("El destino debe ser Nacional o Exportación.")
     if datos.unidad_solicitada not in (UnidadSolicitada.KG, UnidadSolicitada.CANASTILLAS):
         raise ErrorDeValidacion("La unidad solicitada debe ser Kg o Canastillas.")
+
+    _validar_horas(datos)
 
     horno = db.get(Horno, datos.horno_id)
     if horno is None or not horno.activo:
@@ -185,12 +204,22 @@ def crear_orden(db: Session, datos: OrdenGuardar, supervisor: Usuario) -> OrdenP
         cantidad_programada=cantidad_kg,
         unidad_solicitada=datos.unidad_solicitada,
         cantidad_canastillas_solicitadas=canastillas,
+        horas_produccion=datos.horas_produccion,
         destino=datos.destino,
         estado=EstadoOrden.PENDIENTE,
     )
     db.add(orden)
     db.commit()
     db.refresh(orden)
+
+    # Aviso a los operarios de que hay una orden nueva que trabajar. Si algo
+    # falla al notificar, la orden YA quedo creada: se registra el problema
+    # pero no se le devuelve un error al supervisor.
+    try:
+        notificaciones.avisar_orden_creada(db, orden)
+    except Exception:  # noqa: BLE001
+        logger.exception("No se pudo notificar la creación de la orden %s", orden.numero_orden)
+
     return orden
 
 
@@ -229,6 +258,7 @@ def editar_orden(db: Session, orden: OrdenProduccion, datos: OrdenGuardar) -> Or
     orden.categoria_id = datos.categoria_id
     orden.unidad_solicitada = datos.unidad_solicitada
     orden.cantidad_canastillas_solicitadas = canastillas
+    orden.horas_produccion = datos.horas_produccion
     orden.cantidad_programada = cantidad_kg
     orden.destino = datos.destino
 
@@ -272,6 +302,14 @@ def iniciar_orden(db: Session, orden: OrdenProduccion) -> OrdenProduccion:
             "Ese horno acaba de quedar ocupado por otra orden. Intenta de nuevo."
         ) from exc
     db.refresh(orden)
+
+    # Aqui empieza a correr el reloj de la produccion: se deja programado el
+    # aviso de "faltan 15 minutos" para el final calculado.
+    try:
+        notificaciones.programar_aviso_fin_produccion(db, orden)
+    except Exception:  # noqa: BLE001
+        logger.exception("No se pudo programar el aviso de fin de %s", orden.numero_orden)
+
     return orden
 
 

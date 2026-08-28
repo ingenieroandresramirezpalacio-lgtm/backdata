@@ -467,3 +467,45 @@ def obtener_densidad_vigente(db: Session, horno_id: int, fecha: date) -> Decimal
         .limit(1)
     )
     return muestra.densidad_kg_por_litro if muestra else None
+
+
+def obtener_densidades_vigentes_todos_hornos(
+    db: Session, fecha: date
+) -> list[dict]:
+    """
+    Obtiene en una sola consulta consolidada la ultima densidad vigente de cada horno.
+    """
+    hornos = listar_hornos(db)
+    if not hornos:
+        return []
+
+    muestras = list(
+        db.scalars(
+            select(MuestraDensidadAceite)
+            .where(MuestraDensidadAceite.fecha <= fecha)
+            .order_by(
+                MuestraDensidadAceite.horno_id,
+                MuestraDensidadAceite.fecha.desc(),
+                MuestraDensidadAceite.id.desc(),
+            )
+        ).all()
+    )
+
+    ultima_muestra: dict[int, MuestraDensidadAceite] = {}
+    for m in muestras:
+        if m.horno_id not in ultima_muestra:
+            ultima_muestra[m.horno_id] = m
+
+    resultado = []
+    for horno in hornos:
+        m = ultima_muestra.get(horno.id)
+        resultado.append(
+            {
+                "horno_id": horno.id,
+                "horno_nombre": horno.nombre,
+                "fecha": m.fecha if m else None,
+                "densidad_kg_por_litro": m.densidad_kg_por_litro if m else None,
+            }
+        )
+    return resultado
+

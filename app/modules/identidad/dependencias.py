@@ -9,28 +9,27 @@ Dependencias de sesion y permisos, reutilizables por todos los modulos.
 
 from typing import Annotated
 
-from fastapi import Depends
-from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from fastapi import Depends, Request
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.core.errores import CredencialesInvalidas, PermisoDenegado
 from app.core.seguridad import leer_token_acceso
 from app.db.session import get_db
 from app.modules.identidad.models import Usuario
 
-# auto_error=False: si no llega el encabezado Authorization preferimos
-# lanzar nuestro propio error (con mensaje en espanol) en vez del de FastAPI.
-esquema_bearer = HTTPBearer(auto_error=False, description="Token JWT obtenido en /auth/login")
-
 
 def usuario_actual(
-    credenciales: Annotated[HTTPAuthorizationCredentials | None, Depends(esquema_bearer)],
+    request: Request,
     db: Annotated[Session, Depends(get_db)],
 ) -> Usuario:
-    if credenciales is None:
+    # El token viaja en una cookie HttpOnly puesta por /auth/login: el
+    # navegador la envia sola, el JavaScript nunca la ve.
+    token = request.cookies.get(settings.cookie_nombre)
+    if not token:
         raise CredencialesInvalidas("Necesitas iniciar sesión.")
 
-    contenido = leer_token_acceso(credenciales.credentials)
+    contenido = leer_token_acceso(token)
     usuario_id = contenido.get("sub")
     if usuario_id is None:
         raise CredencialesInvalidas("Tu sesión no es válida. Vuelve a iniciar sesión.")

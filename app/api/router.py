@@ -16,6 +16,7 @@ from app.db.session import get_db
 from app.modules.analitica.router import router as router_analitica
 from app.modules.catalogos.router import router as router_catalogos
 from app.modules.identidad.router import router_auth, router_usuarios
+from app.modules.notificaciones.router import router as router_notificaciones
 from app.modules.produccion.router import router as router_produccion
 
 api_router = APIRouter(prefix="/api/v1")
@@ -25,6 +26,7 @@ api_router.include_router(router_usuarios)
 api_router.include_router(router_catalogos)
 api_router.include_router(router_produccion)
 api_router.include_router(router_analitica)
+api_router.include_router(router_notificaciones)
 
 
 @api_router.get("/salud", tags=["Estado"])

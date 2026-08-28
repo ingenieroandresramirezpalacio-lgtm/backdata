@@ -202,19 +202,7 @@ def densidades_vigentes(db: BD, _: SoloAdmin):
     from app.core.tiempo import hoy_local
 
     hoy = hoy_local()
-    resultado = []
-    for horno in service.listar_hornos(db):
-        muestras = service.listar_muestras_densidad(db, horno.id)
-        vigente = service.obtener_densidad_vigente(db, horno.id, hoy)
-        resultado.append(
-            DensidadVigenteSalida(
-                horno_id=horno.id,
-                horno_nombre=horno.nombre,
-                fecha=muestras[0].fecha if muestras else None,
-                densidad_kg_por_litro=vigente,
-            )
-        )
-    return resultado
+    return service.obtener_densidades_vigentes_todos_hornos(db, hoy)
 
 
 @router.post(

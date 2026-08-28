@@ -53,9 +53,13 @@ class LoginPeticion(BaseModel):
     password: str = Field(min_length=1)
 
 
-class TokenSalida(BaseModel):
-    access_token: str
-    token_type: str = "bearer"
+class SesionSalida(BaseModel):
+    """
+    Respuesta del login. NO incluye el token a proposito: el token viaja en
+    una cookie HttpOnly que el frontend nunca ve. Aqui solo van los datos
+    del usuario y cuanto dura la sesion (para avisar antes de que expire).
+    """
+
     expira_en_segundos: int
     usuario: UsuarioSalida
 

@@ -47,36 +47,67 @@ ENCABEZADOS = [
 def obtener_filas(db: Session, filtros: FiltrosAnalisis) -> list[list]:
     ordenes_sub = consulta_ordenes_filtradas(filtros).subquery()
 
-    ordenes = db.scalars(
-        select(OrdenProduccion)
-        .where(OrdenProduccion.id.in_(select(ordenes_sub.c.id)))
-        .order_by(OrdenProduccion.fecha, OrdenProduccion.numero_orden)
-    ).unique().all()
+    ordenes = list(
+        db.scalars(
+            select(OrdenProduccion)
+            .where(OrdenProduccion.id.in_(select(ordenes_sub.c.id)))
+            .order_by(OrdenProduccion.fecha, OrdenProduccion.numero_orden)
+        ).unique().all()
+    )
 
-    filas: list[list] = [ENCABEZADOS]
-    for orden in ordenes:
-        kg_crudos, bultos, kg_aceite = db.execute(
+    if not ordenes:
+        return [ENCABEZADOS]
+
+    orden_ids = [orden.id for orden in ordenes]
+
+    # Agregaciones en bloque: O(1) consultas en lugar de O(N)
+    horno_totales = {
+        fila[0]: (fila[1], fila[2], fila[3])
+        for fila in db.execute(
             select(
+                RegistroHorno.orden_id,
                 func.coalesce(func.sum(RegistroHorno.kg_crudos_calculados), 0),
                 func.coalesce(func.sum(RegistroHorno.cantidad_bultos), 0),
                 func.coalesce(func.sum(RegistroHorno.kg_aceite_consumido), 0),
-            ).where(RegistroHorno.orden_id == orden.id, RegistroHorno.eliminado == False)
-        ).one()
+            )
+            .where(RegistroHorno.orden_id.in_(orden_ids), RegistroHorno.eliminado == False)
+            .group_by(RegistroHorno.orden_id)
+        ).all()
+    }
 
-        kg_desperdicio = db.scalar(
-            select(func.coalesce(func.sum(Desperdicio.cantidad_kg), 0))
-            .join(RegistroHorno, Desperdicio.registro_horno_id == RegistroHorno.id)
-            .where(RegistroHorno.orden_id == orden.id, RegistroHorno.eliminado == False)
-        )
-
-        kg_papa_frita, kg_sabor = db.execute(
+    desperdicio_totales = dict(
+        db.execute(
             select(
+                RegistroHorno.orden_id,
+                func.coalesce(func.sum(Desperdicio.cantidad_kg), 0),
+            )
+            .join(RegistroHorno, Desperdicio.registro_horno_id == RegistroHorno.id)
+            .where(RegistroHorno.orden_id.in_(orden_ids), RegistroHorno.eliminado == False)
+            .group_by(RegistroHorno.orden_id)
+        ).all()
+    )
+
+    saborizado_totales = {
+        fila[0]: (fila[1], fila[2])
+        for fila in db.execute(
+            select(
+                RegistroSaborizado.orden_id,
                 func.coalesce(func.sum(RegistroSaborizado.kg_recibidos), 0),
                 func.coalesce(func.sum(RegistroSaborizado.cantidad_sabor_kg), 0),
-            ).where(
-                RegistroSaborizado.orden_id == orden.id, RegistroSaborizado.eliminado == False
             )
-        ).one()
+            .where(
+                RegistroSaborizado.orden_id.in_(orden_ids),
+                RegistroSaborizado.eliminado == False,
+            )
+            .group_by(RegistroSaborizado.orden_id)
+        ).all()
+    }
+
+    filas: list[list] = [ENCABEZADOS]
+    for orden in ordenes:
+        kg_crudos, bultos, kg_aceite = horno_totales.get(orden.id, (0, 0, 0))
+        kg_desperdicio = desperdicio_totales.get(orden.id, 0)
+        kg_papa_frita, kg_sabor = saborizado_totales.get(orden.id, (0, 0))
 
         filas.append(
             [
@@ -94,7 +125,7 @@ def obtener_filas(db: Session, filtros: FiltrosAnalisis) -> list[list]:
                 float(bultos),
                 float(kg_papa_frita),
                 float(kg_sabor),
-                float(kg_desperdicio or 0),
+                float(kg_desperdicio),
                 float(kg_aceite),
             ]
         )

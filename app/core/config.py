@@ -30,6 +30,17 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     access_token_expire_minutes: int = 480
 
+    # --- Cookie de sesion ---
+    # El token de sesion viaja en una cookie HttpOnly: el JavaScript del
+    # navegador NUNCA puede leerla, asi que un ataque XSS no puede robar la
+    # sesion (a diferencia de guardarla en localStorage). El navegador la
+    # envia sola en cada peticion a la API.
+    cookie_nombre: str = "datacontrol_sesion"
+    # Solo se manda por HTTPS. En desarrollo (http://localhost) tiene que ser
+    # False o el navegador descarta la cookie; en produccion, con HTTPS, se
+    # activa sola (ver la propiedad cookie_secure).
+    cookie_secure_forzar: bool = False
+
     # --- CORS ---
     # Se lee como texto separado por comas (ver la propiedad origenes_cors).
     # Si se declarara como list[str], pydantic-settings exigiria escribirlo
@@ -63,6 +74,15 @@ class Settings(BaseSettings):
     @property
     def es_produccion(self) -> bool:
         return self.app_env.lower() == "production"
+
+    @property
+    def cookie_secure(self) -> bool:
+        """
+        La cookie de sesion se marca Secure (solo HTTPS) en produccion, o si
+        se fuerza a mano. En desarrollo por HTTP queda en False para que el
+        navegador no la rechace.
+        """
+        return self.es_produccion or self.cookie_secure_forzar
 
 
 @lru_cache

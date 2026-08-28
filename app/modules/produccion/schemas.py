@@ -47,6 +47,7 @@ class OrdenSalida(BaseModel):
     cantidad_programada: Decimal
     unidad_solicitada: str
     cantidad_canastillas_solicitadas: Decimal | None
+    horas_produccion: int | None
     hora_inicio: datetime | None
     hora_fin: datetime | None
     supervisor: UsuarioRef
@@ -67,6 +68,10 @@ class OrdenGuardar(BaseModel):
     # canastillas (que la app convierte a kg con el peso estandar).
     cantidad_kg: Decimal | None = Field(default=None, gt=0)
     cantidad_canastillas: Decimal | None = Field(default=None, gt=0)
+    # Horas COMPLETAS que se va a mandar la orden a produccion. Es un entero
+    # a proposito: en la planta no se programan medias horas, y el minimo es
+    # una hora.
+    horas_produccion: int | None = Field(default=None, ge=1)
 
 
 # --- Registro de horno -----------------------------------------------------

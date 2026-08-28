@@ -6,10 +6,10 @@ Rutas HTTP del modulo Identidad:
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Response, status
 from sqlalchemy.orm import Session
 
-from app.core.seguridad import crear_token_acceso
+from app.core.seguridad import borrar_cookie_sesion, crear_token_acceso, poner_cookie_sesion
 from app.db.session import get_db
 from app.modules.identidad import service
 from app.modules.identidad.dependencias import UsuarioAutenticado, requiere_roles
@@ -18,7 +18,7 @@ from app.modules.identidad.schemas import (
     CambiarPasswordPeticion,
     LoginPeticion,
     RolSalida,
-    TokenSalida,
+    SesionSalida,
     UsuarioActualizar,
     UsuarioCrear,
     UsuarioSalida,
@@ -34,15 +34,24 @@ router_usuarios = APIRouter(prefix="/usuarios", tags=["Usuarios"])
 # --- Autenticacion ---------------------------------------------------------
 
 
-@router_auth.post("/login", response_model=TokenSalida)
-def iniciar_sesion(datos: LoginPeticion, db: BD) -> TokenSalida:
+@router_auth.post("/login", response_model=SesionSalida)
+def iniciar_sesion(datos: LoginPeticion, db: BD, response: Response) -> SesionSalida:
     usuario = service.autenticar(db, datos.nombre_usuario.strip().lower(), datos.password)
     token, segundos = crear_token_acceso(usuario.id, usuario.rol.codigo)
-    return TokenSalida(
-        access_token=token,
+    # El token se entrega SOLO como cookie HttpOnly: no vuelve en el cuerpo,
+    # asi que el JavaScript del navegador nunca llega a verlo.
+    poner_cookie_sesion(response, token, segundos)
+    return SesionSalida(
         expira_en_segundos=segundos,
         usuario=UsuarioSalida.model_validate(usuario),
     )
+
+
+@router_auth.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
+def cerrar_sesion(response: Response) -> None:
+    """Borra la cookie de sesion. No exige estar autenticado: si ya no hay
+    sesion valida, igual limpia cualquier cookie residual."""
+    borrar_cookie_sesion(response)
 
 
 @router_auth.get("/yo", response_model=UsuarioSalida)

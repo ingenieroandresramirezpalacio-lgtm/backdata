@@ -2,8 +2,11 @@
 Rutas HTTP del modulo Produccion: /api/v1/ordenes/...
 
 Quien puede hacer que:
-  * Crear / iniciar / finalizar / cancelar / editar ordenes: Supervisor
+  * Crear / finalizar / cancelar / editar ordenes: Supervisor
     (el Administrador tambien, para poder ayudar desde la oficina).
+  * INICIAR la produccion: ademas de ellos, los operarios de horno y
+    saborizado. Son quienes estan en la maquina y toman la orden que van a
+    trabajar, sin tener que esperar a que el supervisor la arranque.
   * Registrar tandas de horno: Operario de Horno.
   * Registrar recepciones de saborizado: Operario de Saborizado.
   * Eliminar (borrado suave): solo Administrador.
@@ -42,12 +45,44 @@ OperarioSaborizado = Annotated[
     Usuario, Depends(requiere_roles(RolCodigo.ADMIN, RolCodigo.OPERARIO_SABORIZADO))
 ]
 
+# Tomar una orden y arrancar la produccion tambien es trabajo de planta: el
+# operario que va a trabajarla la inicia sin esperar al supervisor.
+TomaOrdenes = Annotated[
+    Usuario,
+    Depends(
+        requiere_roles(
+            RolCodigo.ADMIN,
+            RolCodigo.SUPERVISOR,
+            RolCodigo.OPERARIO_HORNO,
+            RolCodigo.OPERARIO_SABORIZADO,
+        )
+    ),
+]
+
 router = APIRouter(prefix="/ordenes", tags=["Órdenes de producción"])
 
 
 def _verificar_puede_gestionar(orden, usuario: Usuario) -> None:
     """Un supervisor solo gestiona sus propias ordenes; el admin, todas."""
     if usuario.rol.codigo == RolCodigo.ADMIN:
+        return
+    if orden.supervisor_id != usuario.id:
+        raise PermisoDenegado("Esta orden es de otro supervisor.")
+
+
+def _verificar_puede_iniciar(orden, usuario: Usuario) -> None:
+    """
+    Quien puede arrancar la produccion de una orden.
+
+    Los operarios pueden tomar cualquier orden pendiente: son ellos quienes
+    la van a trabajar en el horno o en saborizado. El supervisor sigue
+    limitado a las suyas y el administrador puede con todas.
+    """
+    if usuario.rol.codigo in (
+        RolCodigo.ADMIN,
+        RolCodigo.OPERARIO_HORNO,
+        RolCodigo.OPERARIO_SABORIZADO,
+    ):
         return
     if orden.supervisor_id != usuario.id:
         raise PermisoDenegado("Esta orden es de otro supervisor.")
@@ -97,9 +132,10 @@ def editar(orden_id: int, datos: OrdenGuardar, db: BD, usuario: Supervisa):
 
 
 @router.post("/{orden_id}/iniciar", response_model=OrdenSalida)
-def iniciar(orden_id: int, db: BD, usuario: Supervisa):
+def iniciar(orden_id: int, db: BD, usuario: TomaOrdenes):
+    """El operario toma la orden que va a trabajar y arranca la producción."""
     orden = servicio_ordenes.obtener_orden(db, orden_id)
-    _verificar_puede_gestionar(orden, usuario)
+    _verificar_puede_iniciar(orden, usuario)
     return servicio_ordenes.iniciar_orden(db, orden)
 
 
