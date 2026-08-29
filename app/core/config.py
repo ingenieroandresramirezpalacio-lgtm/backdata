@@ -95,6 +95,25 @@ class Settings(BaseSettings):
             f"@{self.postgres_host}:{self.postgres_port}/{self.postgres_db}"
         )
 
+    @property
+    def destino_base_datos(self) -> str:
+        """
+        A donde se esta intentando conectar, SIN la contrasena. Sirve para
+        escribirlo en el log sin filtrar credenciales.
+        """
+        sin_driver = self.database_url.split("://", 1)[-1]
+        # usuario:clave@host:puerto/base  ->  host:puerto/base
+        return sin_driver.split("@")[-1] if "@" in sin_driver else sin_driver
+
+    @property
+    def usa_host_de_compose(self) -> bool:
+        """
+        True cuando se va a conectar al host "db", que SOLO existe dentro de
+        Docker Compose. Si esto pasa en un servidor de nube, es que falta
+        configurar DATABASE_URL.
+        """
+        return not self.database_url_externa and self.postgres_host == "db"
+
     @staticmethod
     def _normalizar(url: str) -> str:
         """

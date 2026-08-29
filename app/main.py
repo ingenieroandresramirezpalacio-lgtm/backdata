@@ -12,6 +12,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy.exc import OperationalError
 
 from app.api.manejadores import registrar_manejadores
 from app.api.router import api_router
@@ -38,7 +39,21 @@ async def ciclo_de_vida(_: FastAPI) -> AsyncIterator[None]:
     # quedaria vacia. Si falla, NO se arranca: es preferible un despliegue
     # caido y visible a una API respondiendo contra una base incompleta.
     if settings.migrar_al_arrancar:
-        aplicar_migraciones_pendientes(engine)
+        try:
+            aplicar_migraciones_pendientes(engine)
+        except OperationalError:
+            # El traceback de SQLAlchemy no dice QUE falta configurar, asi que
+            # se explica antes de dejarlo subir.
+            logger.error(
+                "No se pudo conectar a la base de datos en %s", settings.destino_base_datos
+            )
+            if settings.usa_host_de_compose:
+                logger.error(
+                    'El host "db" solo existe dentro de Docker Compose. Si esto corre en '
+                    "Render, Railway o un servidor, falta la variable de entorno "
+                    "DATABASE_URL con la cadena de conexión que entrega el proveedor."
+                )
+            raise
 
     # 2) Usuario administrador inicial (solo la primera vez).
     db = SessionLocal()
