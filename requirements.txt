@@ -10,7 +10,7 @@ pydantic==2.10.4
 pydantic-settings==2.7.1
 
 # --- Base de datos ---
-# El esquema lo maneja Flyway (database/migrations). SQLAlchemy solo lee y
+# El esquema lo maneja Flyway (backend/migraciones). SQLAlchemy solo lee y
 # escribe datos: aqui no hay autogeneracion de migraciones.
 sqlalchemy==2.0.36
 psycopg[binary]==3.2.3

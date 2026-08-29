@@ -9,6 +9,7 @@ escritas a mano.
 
 from functools import lru_cache
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -19,11 +20,21 @@ class Settings(BaseSettings):
     tz: str = "America/Bogota"
 
     # --- Base de datos ---
+    # Si el proveedor de nube entrega una URL completa (Render, Railway...),
+    # se usa esa y se ignoran las piezas sueltas de abajo. El alias
+    # DATABASE_URL es el nombre estandar que usan esos servicios.
+    database_url_externa: str = Field(default="", alias="DATABASE_URL")
+
     postgres_user: str = "datacontrol"
     postgres_password: str = "datacontrol"
     postgres_db: str = "datacontrol"
     postgres_host: str = "db"
     postgres_port: int = 5432
+
+    # Aplicar las migraciones al arrancar la API. Imprescindible cuando no
+    # hay contenedor de Flyway (despliegues en la nube). En local es
+    # inofensivo: ve que Flyway ya las aplico y no repite nada.
+    migrar_al_arrancar: bool = True
 
     # --- Seguridad (JWT) ---
     jwt_secret_key: str = "clave-de-desarrollo-cambiar-en-produccion"
@@ -56,6 +67,9 @@ class Settings(BaseSettings):
         env_file=".env",
         env_file_encoding="utf-8",
         extra="ignore",
+        # populate_by_name: permite que el campo se llene tanto por su alias
+        # (DATABASE_URL) como por su nombre en Python.
+        populate_by_name=True,
     )
 
     @property
@@ -65,11 +79,37 @@ class Settings(BaseSettings):
 
     @property
     def database_url(self) -> str:
-        """Cadena de conexion que usa SQLAlchemy para hablar con PostgreSQL."""
+        """
+        Cadena de conexion que usa SQLAlchemy para hablar con PostgreSQL.
+
+        Dos formas de configurarla:
+          1) DATABASE_URL completa. Es lo que entregan los servicios de nube
+             (Render, Railway, Heroku...) y tiene prioridad.
+          2) Las piezas sueltas POSTGRES_USER/PASSWORD/HOST/PORT/DB, que es
+             lo comodo en local con Docker Compose.
+        """
+        if self.database_url_externa:
+            return self._normalizar(self.database_url_externa)
         return (
             f"postgresql+psycopg://{self.postgres_user}:{self.postgres_password}"
             f"@{self.postgres_host}:{self.postgres_port}/{self.postgres_db}"
         )
+
+    @staticmethod
+    def _normalizar(url: str) -> str:
+        """
+        Ajusta la URL al driver que usamos (psycopg 3).
+
+        Los proveedores entregan "postgres://" o "postgresql://"; SQLAlchemy
+        necesita saber el driver, o intentaria usar psycopg2 (que no esta
+        instalado).
+        """
+        url = url.strip()
+        if url.startswith("postgres://"):
+            url = "postgresql://" + url[len("postgres://") :]
+        if url.startswith("postgresql://"):
+            url = "postgresql+psycopg://" + url[len("postgresql://") :]
+        return url
 
     @property
     def es_produccion(self) -> bool:

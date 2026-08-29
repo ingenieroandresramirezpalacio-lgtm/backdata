@@ -33,6 +33,7 @@ RUN pip install --no-cache-dir -r requirements-dev.txt
 
 COPY pyproject.toml ./
 COPY app ./app
+COPY migraciones ./migraciones
 COPY tests ./tests
 RUN chown -R datacontrol:datacontrol /code
 USER datacontrol
@@ -43,9 +44,13 @@ CMD ["pytest"]
 FROM base AS produccion
 
 COPY app ./app
+COPY migraciones ./migraciones
 RUN chown -R datacontrol:datacontrol /code
 USER datacontrol
 
 EXPOSE 8000
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Los servicios de nube (Render, Railway...) asignan el puerto en la variable
+# PORT y esperan que la app escuche ahi. En local no existe esa variable y se
+# usa el 8000 de siempre.
+CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]

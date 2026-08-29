@@ -17,7 +17,8 @@ from app.api.manejadores import registrar_manejadores
 from app.api.router import api_router
 from app.core.config import settings
 from app.db.bootstrap import crear_admin_inicial
-from app.db.session import SessionLocal
+from app.db.migraciones import aplicar_migraciones_pendientes
+from app.db.session import SessionLocal, engine
 
 logging.basicConfig(
     level=logging.INFO,
@@ -29,6 +30,17 @@ logger = logging.getLogger("datacontrol")
 @asynccontextmanager
 async def ciclo_de_vida(_: FastAPI) -> AsyncIterator[None]:
     """Se ejecuta una vez al arrancar (y al apagar) el servidor."""
+    # 1) Esquema de la base al dia.
+    #
+    # En local esto no hace nada: Flyway ya aplico las migraciones antes de
+    # que la API arranque. Pero cuando el backend se despliega solo (Render,
+    # Railway, un VPS) no hay contenedor de Flyway, y sin esto la base
+    # quedaria vacia. Si falla, NO se arranca: es preferible un despliegue
+    # caido y visible a una API respondiendo contra una base incompleta.
+    if settings.migrar_al_arrancar:
+        aplicar_migraciones_pendientes(engine)
+
+    # 2) Usuario administrador inicial (solo la primera vez).
     db = SessionLocal()
     try:
         crear_admin_inicial(db)

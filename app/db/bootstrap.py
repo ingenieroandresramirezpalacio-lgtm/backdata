@@ -2,7 +2,7 @@
 Arranque inicial: crear el usuario administrador la primera vez.
 
 Los datos de catalogo (roles, turnos, hornos...) los carga Flyway en
-database/migrations/V2__datos_iniciales.sql. El administrador no puede ir
+backend/migraciones/V2__datos_iniciales.sql. El administrador no puede ir
 ahi porque su contrasena tiene que quedar cifrada con bcrypt, asi que se
 crea desde Python al arrancar la API, leyendo ADMIN_USERNAME y
 ADMIN_PASSWORD del archivo .env.
