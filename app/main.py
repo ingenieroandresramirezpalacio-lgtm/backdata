@@ -7,6 +7,7 @@ app/modules/<modulo>/service.py.
 """
 
 import logging
+import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -52,6 +53,18 @@ async def ciclo_de_vida(_: FastAPI) -> AsyncIterator[None]:
                     'El host "db" solo existe dentro de Docker Compose. Si esto corre en '
                     "Render, Railway o un servidor, falta la variable de entorno "
                     "DATABASE_URL con la cadena de conexión que entrega el proveedor."
+                )
+                # Se listan solo los NOMBRES (nunca los valores: llevan la
+                # contrasena). Si aqui aparece algo parecido a DATABASE_URL
+                # pero escrito distinto, ese es el error.
+                relacionadas = sorted(
+                    nombre
+                    for nombre in os.environ
+                    if "DATABASE" in nombre.upper() or "POSTGRES" in nombre.upper()
+                )
+                logger.error(
+                    "Variables de entorno relacionadas que sí llegan a la app: %s",
+                    ", ".join(relacionadas) if relacionadas else "NINGUNA",
                 )
             raise
 
