@@ -4,10 +4,15 @@ Exportacion de datos a CSV y Excel.
 Genera una fila por orden de produccion, con el numero de orden como
 identificador (para poder cruzarla con otros analisis) y los mismos
 totales que muestra la pantalla de Analisis, respetando sus filtros.
+
+Las funciones de generacion devuelven generadores para que los archivos
+grandes se transmitan por chunks (StreamingResponse) en lugar de cargarse
+completamente en memoria.
 """
 
 import csv
 import io
+from collections.abc import Generator
 from datetime import datetime
 
 from openpyxl import Workbook
@@ -132,14 +137,32 @@ def obtener_filas(db: Session, filtros: FiltrosAnalisis) -> list[list]:
     return filas
 
 
-def generar_csv(filas: list[list]) -> bytes:
-    salida = io.StringIO()
-    csv.writer(salida, delimiter=";").writerows(filas)
-    # utf-8-sig (con BOM) para que Excel en Windows abra bien las tildes.
-    return salida.getvalue().encode("utf-8-sig")
+def _csv_chunked(filas: list[list]) -> Generator[bytes, None, None]:
+    """
+    Genera el CSV en chunks de ~64KB para no cargar todo en memoria.
+    Ideal para exportaciones con miles de ordenes.
+    """
+    buffer = io.StringIO()
+    writer = csv.writer(buffer, delimiter=";")
+    writer.writerows(filas)
+    contenido = buffer.getvalue().encode("utf-8-sig")
+
+    chunk_size = 65536
+    for i in range(0, len(contenido), chunk_size):
+        yield contenido[i : i + chunk_size]
 
 
-def generar_excel(filas: list[list]) -> bytes:
+def generar_csv(filas: list[list]) -> Generator[bytes, None, None]:
+    """Devuelve un generador de chunks CSV para StreamingResponse."""
+    return _csv_chunked(filas)
+
+
+def generar_excel(filas: list[list]) -> Generator[bytes, None, None]:
+    """
+    Genera el Excel y lo devuelve en chunks via BytesIO.
+    openpyxl necesita un buffer completo para save(), pero luego
+    lo transmitimos por partes.
+    """
     libro = Workbook()
     hoja = libro.active
     hoja.title = "Producción"
@@ -147,15 +170,20 @@ def generar_excel(filas: list[list]) -> bytes:
         hoja.append(fila)
 
     # Ancho de columna aproximado al contenido, para que se lea sin ajustar.
-    for indice, encabezado in enumerate(filas[0], start=1):
-        largo = max((len(str(fila[indice - 1])) for fila in filas), default=len(encabezado))
-        hoja.column_dimensions[hoja.cell(row=1, column=indice).column_letter].width = min(
-            max(12, largo + 2), 40
-        )
+    if filas:
+        for indice, encabezado in enumerate(filas[0], start=1):
+            largo = max((len(str(fila[indice - 1])) for fila in filas), default=len(encabezado))
+            hoja.column_dimensions[hoja.cell(row=1, column=indice).column_letter].width = min(
+                max(12, largo + 2), 40
+            )
 
     buffer = io.BytesIO()
     libro.save(buffer)
-    return buffer.getvalue()
+    contenido = buffer.getvalue()
+
+    chunk_size = 65536
+    for i in range(0, len(contenido), chunk_size):
+        yield contenido[i : i + chunk_size]
 
 
 def nombre_archivo(extension: str, momento: datetime | None = None) -> str:

@@ -6,10 +6,11 @@ Toda esta seccion es exclusiva del Administrador / Analista.
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query
-from fastapi.responses import Response
+from fastapi import APIRouter, Depends, Query, Request
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
+from app.core.limite import limiter
 from app.db.session import get_db
 from app.modules.analitica import exportacion, service
 from app.modules.analitica.schemas import (
@@ -57,39 +58,42 @@ Filtros = Annotated[FiltrosAnalisis, Depends(filtros_desde_query)]
 
 
 @router.get("/indicadores", response_model=IndicadoresSalida)
-def indicadores(db: BD, _: SoloAdmin, filtros: Filtros):
+@limiter.limit("30/minute")
+def indicadores(request: Request, db: BD, _: SoloAdmin, filtros: Filtros):
     return service.calcular_indicadores(db, filtros)
 
 
 @router.get("/por-categoria", response_model=list[IndicadoresCategoriaSalida])
-def por_categoria(db: BD, _: SoloAdmin, filtros: Filtros):
+@limiter.limit("30/minute")
+def por_categoria(request: Request, db: BD, _: SoloAdmin, filtros: Filtros):
     return service.calcular_indicadores_por_categoria(db, filtros)
 
 
 @router.get("/baches", response_model=list[FilaBache])
-def baches(db: BD, _: SoloAdmin, filtros: Filtros):
+@limiter.limit("30/minute")
+def baches(request: Request, db: BD, _: SoloAdmin, filtros: Filtros):
     return service.obtener_detalle_baches(db, filtros)
 
 
 @router.get("/exportar.csv")
-def exportar_csv(db: BD, _: SoloAdmin, filtros: Filtros) -> Response:
-    contenido = exportacion.generar_csv(exportacion.obtener_filas(db, filtros))
-    return Response(
-        content=contenido,
+@limiter.limit("10/minute")
+def exportar_csv(request: Request, db: BD, _: SoloAdmin, filtros: Filtros) -> StreamingResponse:
+    filas = exportacion.obtener_filas(db, filtros)
+    nombre = exportacion.nombre_archivo("csv")
+    return StreamingResponse(
+        exportacion.generar_csv(filas),
         media_type="text/csv; charset=utf-8",
-        headers={
-            "Content-Disposition": f'attachment; filename="{exportacion.nombre_archivo("csv")}"'
-        },
+        headers={"Content-Disposition": f'attachment; filename="{nombre}"'},
     )
 
 
 @router.get("/exportar.xlsx")
-def exportar_excel(db: BD, _: SoloAdmin, filtros: Filtros) -> Response:
-    contenido = exportacion.generar_excel(exportacion.obtener_filas(db, filtros))
-    return Response(
-        content=contenido,
+@limiter.limit("10/minute")
+def exportar_excel(request: Request, db: BD, _: SoloAdmin, filtros: Filtros) -> StreamingResponse:
+    filas = exportacion.obtener_filas(db, filtros)
+    nombre = exportacion.nombre_archivo("xlsx")
+    return StreamingResponse(
+        exportacion.generar_excel(filas),
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={
-            "Content-Disposition": f'attachment; filename="{exportacion.nombre_archivo("xlsx")}"'
-        },
+        headers={"Content-Disposition": f'attachment; filename="{nombre}"'},
     )

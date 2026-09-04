@@ -31,6 +31,15 @@ class Settings(BaseSettings):
     postgres_host: str = "db"
     postgres_port: int = 5432
 
+    # --- Pool de conexiones ---
+    # En local se carga poco y bastan unas pocas conexiones. En el servidor
+    # real, con varios operarios metiendo datos a la vez, se sube el tamaño
+    # con DATABASE_POOL_SIZE / DB_MAX_OVERFLOW. El maximo real lo pone
+    # PostgreSQL (default: 100 conexiones).
+    db_pool_size: int = 10
+    db_max_overflow: int = 20
+    db_pool_recycle_segundos: int = 1800
+
     # Aplicar las migraciones al arrancar la API. Imprescindible cuando no
     # hay contenedor de Flyway (despliegues en la nube). En local es
     # inofensivo: ve que Flyway ya las aplico y no repite nada.
@@ -40,6 +49,11 @@ class Settings(BaseSettings):
     jwt_secret_key: str = "clave-de-desarrollo-cambiar-en-produccion"
     jwt_algorithm: str = "HS256"
     access_token_expire_minutes: int = 480
+
+    # --- Limite de peticiones (rate limiting) ---
+    # 120/min por IP es de sobra para un operario humano. Se baja con
+    # RATE_LIMIT_MINUTE si hace falta apretar la proteccion.
+    rate_limit_minute: str = "120/minute"
 
     # --- Cookie de sesion ---
     # El token de sesion viaja en una cookie HttpOnly: el JavaScript del

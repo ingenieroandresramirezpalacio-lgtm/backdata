@@ -12,6 +12,7 @@ from decimal import Decimal
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.borrado_suave import marcar_eliminado_por
 from app.core.errores import ErrorDeValidacion, RecursoNoEncontrado
 from app.core.tiempo import combinar_fecha_y_hora
 from app.modules.catalogos.models import Sabor
@@ -109,7 +110,5 @@ def editar_recepcion(
 
 def eliminar_recepcion(db: Session, recepcion: RegistroSaborizado, usuario: Usuario) -> None:
     """Borrado suave (solo Administrador; ver el router)."""
-    recepcion.eliminado = True
-    recepcion.eliminado_por_id = usuario.id
-    recepcion.fecha_eliminacion = datetime.now(UTC)
+    marcar_eliminado_por(db, recepcion, usuario)
     db.commit()

@@ -4,8 +4,12 @@
 #   "produccion"   lo que corre en la fabrica: solo las dependencias necesarias.
 #   "desarrollo"   agrega pytest y ruff, para correr pruebas y revisar el codigo.
 # Por defecto se construye "produccion" (es la ultima etapa del archivo).
+#
+# Imagen Alpine: psycopg[binary] trae una wheel musllinux autocontenida, asi
+# que no hace falta libpq del sistema ni compilar nada. Imagen pequena y de
+# build rapido.
 
-FROM python:3.12-slim AS base
+FROM python:3.12-alpine AS base
 
 # Buenas practicas de Python dentro de contenedores:
 #   PYTHONDONTWRITEBYTECODE: no ensucia el volumen con archivos .pyc
@@ -22,8 +26,9 @@ COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
 # La app no corre como root (si alguien lograra entrar al contenedor,
-# tendria los permisos minimos).
-RUN useradd --create-home --uid 1000 datacontrol
+# tendria los permisos minimos). Alpine no trae useradd tradicional:
+# adduser es el equivalente.
+RUN adduser -D -u 1000 datacontrol
 
 # --- Etapa de desarrollo: pruebas y linter -------------------------------
 FROM base AS desarrollo

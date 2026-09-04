@@ -136,7 +136,7 @@ class Producto(Base):
     nombre_comercial: Mapped[str] = mapped_column(String(150), unique=True)
 
     categoria_id: Mapped[int] = mapped_column(ForeignKey("categorias_producto.id"))
-    categoria: Mapped["CategoriaProducto"] = relationship(back_populates="productos", lazy="joined")
+    categoria: Mapped["CategoriaProducto"] = relationship(back_populates="productos", lazy="selectin")
 
     activo: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
 
@@ -198,7 +198,7 @@ class MuestraDensidadAceite(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
 
     horno_id: Mapped[int] = mapped_column(ForeignKey("hornos.id"))
-    horno: Mapped["Horno"] = relationship(lazy="joined")
+    horno: Mapped["Horno"] = relationship(lazy="selectin")
 
     fecha: Mapped[date] = mapped_column(Date)
     densidad_kg_por_litro: Mapped[Decimal] = mapped_column(Numeric(6, 4))

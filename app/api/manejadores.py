@@ -16,6 +16,7 @@ from fastapi import FastAPI, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from slowapi.errors import RateLimitExceeded
 from sqlalchemy.exc import IntegrityError
 
 from app.core.errores import ErrorDeAplicacion
@@ -24,6 +25,15 @@ logger = logging.getLogger("datacontrol")
 
 
 def registrar_manejadores(app: FastAPI) -> None:
+    @app.exception_handler(RateLimitExceeded)
+    async def _demasiadas_peticiones(_: Request, exc: RateLimitExceeded) -> JSONResponse:
+        return JSONResponse(
+            status_code=429,
+            content={
+                "detail": "Demasiadas peticiones en poco tiempo. Espera un momento y vuelve a intentar."
+            },
+        )
+
     @app.exception_handler(ErrorDeAplicacion)
     async def _error_de_aplicacion(_: Request, exc: ErrorDeAplicacion) -> JSONResponse:
         respuesta = JSONResponse(status_code=exc.codigo_http, content={"detail": exc.mensaje})

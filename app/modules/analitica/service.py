@@ -20,6 +20,7 @@ from decimal import Decimal
 from sqlalchemy import Select, func, select
 from sqlalchemy.orm import Session
 
+from app.core.cache import TTL, cache_ttl
 from app.modules.analitica.schemas import (
     Desglose,
     FilaBache,
@@ -87,7 +88,33 @@ def _desglose(filas) -> list[Desglose]:
     return [Desglose(etiqueta=etiqueta, valor=valor) for etiqueta, valor in filas]
 
 
+def _indicadores_cacheado(filtros: FiltrosAnalisis) -> IndicadoresSalida:
+    """Version sin cache con su propia sesion, para no ensuciar la clave de
+    cache con la sesion de cada request (que cambia siempre)."""
+    from app.db.session import SessionLocal
+
+    db = SessionLocal()
+    try:
+        return _calcular_indicadores_interno(db, filtros)
+    finally:
+        db.close()
+
+
+@cache_ttl(TTL.TREINTA_SEGUNDOS)
+def _indicadores_cached_por_filtros(filtros: FiltrosAnalisis) -> dict:
+    """Guarda el resultado cacheado como dict (pydantic son inmutables)."""
+    resultado = _indicadores_cacheado(filtros)
+    return resultado.model_dump()
+
+
 def calcular_indicadores(db: Session, filtros: FiltrosAnalisis) -> IndicadoresSalida:
+    """Punto de entrada publico: cachea 30s por filtros y usa la sesion que
+    recibe solo cuando la cache esta fria."""
+    resultado = _indicadores_cached_por_filtros(filtros)
+    return IndicadoresSalida.model_validate(resultado)
+
+
+def _calcular_indicadores_interno(db: Session, filtros: FiltrosAnalisis) -> IndicadoresSalida:
     ordenes = consulta_ordenes_filtradas(filtros).subquery()
     ids_ordenes = select(ordenes.c.id)
 
@@ -187,49 +214,139 @@ def calcular_indicadores_por_categoria(
     Un cuadro de indicadores por cada categoria presente en el resultado
     filtrado, en vez de todo mezclado en un solo total. Si ya se filtro por
     una categoria, sale un solo cuadro.
+
+    Optimizacion: en vez de N queries (una por categoria), se ejecutan
+    queries agregadas con GROUP BY que resuelven todo en ~4 consultas.
     """
     ordenes = consulta_ordenes_filtradas(filtros).subquery()
+    ids_ordenes = select(ordenes.c.id)
 
+    # 1) Totales de horno por categoria (una sola query).
+    # Dict: categoria_id -> (kg_crudos, bultos, kg_aceite)
+    horno_por_categoria: dict[int, tuple] = {}
+    for cat_id, kg_crudos, bultos, kg_aceite in db.execute(
+        select(
+            OrdenProduccion.categoria_id,
+            func.coalesce(func.sum(RegistroHorno.kg_crudos_calculados), 0),
+            func.coalesce(func.sum(RegistroHorno.cantidad_bultos), 0),
+            func.coalesce(func.sum(RegistroHorno.kg_aceite_consumido), 0),
+        )
+        .select_from(OrdenProduccion)
+        .join(RegistroHorno, RegistroHorno.orden_id == OrdenProduccion.id)
+        .where(
+            OrdenProduccion.id.in_(ids_ordenes),
+            RegistroHorno.eliminado == False,
+        )
+        .group_by(OrdenProduccion.categoria_id)
+    ).all():
+        horno_por_categoria[cat_id] = (kg_crudos, bultos, kg_aceite)
+
+    # 2) Totales de desperdicio por categoria (una sola query)
+    desperdicio_por_categoria = dict(
+        db.execute(
+            select(
+                OrdenProduccion.categoria_id,
+                func.coalesce(func.sum(Desperdicio.cantidad_kg), 0),
+            )
+            .select_from(OrdenProduccion)
+            .join(RegistroHorno, RegistroHorno.orden_id == OrdenProduccion.id)
+            .join(Desperdicio, Desperdicio.registro_horno_id == RegistroHorno.id)
+            .where(
+                OrdenProduccion.id.in_(ids_ordenes),
+                RegistroHorno.eliminado == False,
+            )
+            .group_by(OrdenProduccion.categoria_id)
+        ).all()
+    )
+
+    # 3) Totales de saborizado por categoria (una sola query).
+    # Dict: categoria_id -> (kg_papa_frita, kg_sabor)
+    saborizado_por_categoria: dict[int, tuple] = {}
+    for cat_id, kg_papa_frita, kg_sabor in db.execute(
+        select(
+            OrdenProduccion.categoria_id,
+            func.coalesce(func.sum(RegistroSaborizado.kg_recibidos), 0),
+            func.coalesce(func.sum(RegistroSaborizado.cantidad_sabor_kg), 0),
+        )
+        .select_from(OrdenProduccion)
+        .join(RegistroSaborizado, RegistroSaborizado.orden_id == OrdenProduccion.id)
+        .where(
+            OrdenProduccion.id.in_(ids_ordenes),
+            RegistroSaborizado.eliminado == False,
+        )
+        .group_by(OrdenProduccion.categoria_id)
+    ).all():
+        saborizado_por_categoria[cat_id] = (kg_papa_frita, kg_sabor)
+
+    # 4) Sabores por categoria (una sola query)
+    sabores_por_categoria: dict[int, list] = {}
+    for cat_id, sabor_nombre, kg in db.execute(
+        select(
+            OrdenProduccion.categoria_id,
+            Sabor.nombre,
+            func.coalesce(func.sum(RegistroSaborizado.kg_recibidos), 0),
+        )
+        .select_from(OrdenProduccion)
+        .join(RegistroSaborizado, RegistroSaborizado.orden_id == OrdenProduccion.id)
+        .join(Sabor, RegistroSaborizado.sabor_id == Sabor.id)
+        .where(
+            OrdenProduccion.id.in_(ids_ordenes),
+            RegistroSaborizado.eliminado == False,
+        )
+        .group_by(OrdenProduccion.categoria_id, Sabor.nombre)
+        .order_by(OrdenProduccion.categoria_id, func.sum(RegistroSaborizado.kg_recibidos).desc())
+    ).all():
+        sabores_por_categoria.setdefault(cat_id, []).append((sabor_nombre, kg))
+
+    # 5) Conteo de ordenes por categoria
+    conteo_por_categoria = dict(
+        db.execute(
+            select(OrdenProduccion.categoria_id, func.count())
+            .where(OrdenProduccion.id.in_(ids_ordenes))
+            .group_by(OrdenProduccion.categoria_id)
+        ).all()
+    )
+
+    # Construir resultado
     categorias = db.execute(
         select(CategoriaProducto.id, CategoriaProducto.nombre)
         .join(OrdenProduccion, OrdenProduccion.categoria_id == CategoriaProducto.id)
-        .where(OrdenProduccion.id.in_(select(ordenes.c.id)))
+        .where(OrdenProduccion.id.in_(ids_ordenes))
         .distinct()
         .order_by(CategoriaProducto.nombre)
     ).all()
 
     resultado: list[IndicadoresCategoriaSalida] = []
     for categoria_id, categoria_nombre in categorias:
-        filtros_categoria = filtros.model_copy(update={"categoria_id": categoria_id})
-        indicadores = calcular_indicadores(db, filtros_categoria)
-        ids_categoria = select(consulta_ordenes_filtradas(filtros_categoria).subquery().c.id)
+        kg_crudos, bultos, kg_aceite = horno_por_categoria.get(categoria_id, (CERO, CERO, CERO))
+        kg_desperdicio = desperdicio_por_categoria.get(categoria_id, CERO)
+        kg_papa_frita, kg_sabor = saborizado_por_categoria.get(categoria_id, (CERO, CERO))
+        numero_ordenes = conteo_por_categoria.get(categoria_id, 0)
 
-        sabores = db.execute(
-            select(Sabor.nombre, func.coalesce(func.sum(RegistroSaborizado.kg_recibidos), 0))
-            .select_from(RegistroSaborizado)
-            .join(Sabor, RegistroSaborizado.sabor_id == Sabor.id)
-            .where(
-                RegistroSaborizado.orden_id.in_(ids_categoria),
-                RegistroSaborizado.eliminado == False,
-            )
-            .group_by(Sabor.nombre)
-            .order_by(func.sum(RegistroSaborizado.kg_recibidos).desc())
-        ).all()
+        aceite_por_bulto = rendimiento = absorcion = None
+        if bultos and bultos > 0:
+            aceite_por_bulto = (kg_aceite / bultos).quantize(Decimal("0.01"))
+        if kg_crudos and kg_crudos > 0:
+            rendimiento = (kg_papa_frita / kg_crudos * 100).quantize(Decimal("0.01"))
+        if kg_papa_frita and kg_papa_frita > 0:
+            absorcion = (kg_aceite / kg_papa_frita * 100).quantize(Decimal("0.01"))
+
+        sabores = sabores_por_categoria.get(categoria_id, [])
 
         resultado.append(
             IndicadoresCategoriaSalida(
                 categoria_id=categoria_id,
                 categoria_nombre=categoria_nombre,
-                numero_ordenes=indicadores.numero_ordenes,
-                kg_crudos=indicadores.kg_crudos,
-                cantidad_bultos=indicadores.cantidad_bultos,
-                kg_papa_frita=indicadores.kg_papa_frita,
-                kg_sabor=indicadores.kg_sabor,
-                kg_desperdicio=indicadores.kg_desperdicio,
-                kg_aceite=indicadores.kg_aceite,
-                aceite_por_bulto=indicadores.aceite_por_bulto,
-                rendimiento_porcentaje=indicadores.rendimiento_porcentaje,
-                porcentaje_absorcion_aceite=indicadores.porcentaje_absorcion_aceite,
+                numero_ordenes=numero_ordenes,
+                kg_crudos=kg_crudos,
+                cantidad_bultos=bultos,
+                kg_papa_frita=kg_papa_frita,
+                kg_sabor=kg_sabor,
+                kg_desperdicio=kg_desperdicio,
+                kg_aceite=kg_aceite,
+                aceite_por_bulto=aceite_por_bulto,
+                rendimiento_porcentaje=rendimiento,
+                porcentaje_absorcion_aceite=absorcion,
                 sabores_usados=_desglose(sabores),
             )
         )

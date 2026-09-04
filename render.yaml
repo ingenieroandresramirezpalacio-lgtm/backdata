@@ -59,3 +59,11 @@ services:
 
       - key: TZ
         value: America/Bogota
+
+      # Tamano del pool de conexiones. En el plan free de Render PostgreSQL
+      # limita el numero de conexiones; ajustalo si hace falta.
+      - key: DATABASE_POOL_SIZE
+        value: 10
+
+      - key: DATABASE_MAX_OVERFLOW
+        value: 20

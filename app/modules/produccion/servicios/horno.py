@@ -16,6 +16,7 @@ from decimal import Decimal
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.borrado_suave import marcar_eliminado_por
 from app.core.errores import ErrorDeValidacion, RecursoNoEncontrado
 from app.core.tiempo import combinar_fecha_y_hora
 from app.modules.catalogos.models import Horno, TipoDesperdicio
@@ -164,9 +165,7 @@ def editar_registro(
 
 def eliminar_registro(db: Session, registro: RegistroHorno, usuario: Usuario) -> None:
     """Borrado suave (solo Administrador; ver el router)."""
-    registro.eliminado = True
-    registro.eliminado_por_id = usuario.id
-    registro.fecha_eliminacion = datetime.now(UTC)
+    marcar_eliminado_por(db, registro, usuario)
     db.commit()
 
 

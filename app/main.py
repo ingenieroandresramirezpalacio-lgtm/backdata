@@ -6,26 +6,73 @@ routers de cada modulo y traducir errores. Toda la logica vive en
 app/modules/<modulo>/service.py.
 """
 
+import json
 import logging
 import os
+import sys
+import time
+import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from slowapi.middleware import SlowAPIMiddleware
 from sqlalchemy.exc import OperationalError
 
 from app.api.manejadores import registrar_manejadores
 from app.api.router import api_router
 from app.core.config import settings
+from app.core.limite import limiter
 from app.db.bootstrap import crear_admin_inicial
 from app.db.migraciones import aplicar_migraciones_pendientes
 from app.db.session import SessionLocal, engine
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-)
+# Limite generico: cuantas peticiones puede lanzar cada IP por minuto.
+# Protege a la API de abuso (repeticion automatica, scraping) sin molestar
+# al operario normal, que hace decenas de peticiones, no miles.
+
+
+class FormatoJSON(logging.Formatter):
+    """Logs en una sola linea JSON, para que un agregador los lea facil."""
+
+    def format(self, record: logging.LogRecord) -> str:
+        linea = {
+            "hora": self.formatTime(record, "%Y-%m-%dT%H:%M:%S%z"),
+            "nivel": record.levelname,
+            "logger": record.name,
+            "mensaje": record.getMessage(),
+        }
+        if record.exc_info:
+            linea["excepcion"] = self.formatException(record.exc_info)
+        return json.dumps(linea, ensure_ascii=False)
+
+
+def _configurar_logging() -> None:
+    """En produccion los logs salen como JSON; en desarrollo, legibles."""
+    nivel = logging.INFO
+    formatter: logging.Formatter
+    if settings.es_produccion:
+        formatter = FormatoJSON()
+    else:
+        formatter = logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s")
+
+    manejador = logging.StreamHandler(sys.stdout)
+    manejador.setFormatter(formatter)
+
+    raiz = logging.getLogger()
+    raiz.setLevel(nivel)
+    raiz.handlers.clear()
+    raiz.addHandler(manejador)
+
+    # Que otras librerias no ensucien el log.
+    for nombre in ("uvicorn", "uvicorn.error", "sqlalchemy"):
+        log = logging.getLogger(nombre)
+        log.setLevel(logging.WARNING)
+
+
+_configurar_logging()
+
 logger = logging.getLogger("datacontrol")
 
 
@@ -95,6 +142,10 @@ app = FastAPI(
     openapi_url=None if settings.es_produccion else "/openapi.json",
 )
 
+# El limite de peticiones se aplica a toda la app.
+app.state.limiter = limiter
+app.add_middleware(SlowAPIMiddleware)
+
 # El frontend Angular corre en otro origen (otro puerto), asi que hay que
 # autorizarlo explicitamente. La lista viene del .env.
 app.add_middleware(
@@ -110,9 +161,6 @@ app.add_middleware(
 
 @app.middleware("http")
 async def middleware_trazabilidad(request, call_next):
-    import time
-    import uuid
-
     request_id = request.headers.get("X-Request-ID") or uuid.uuid4().hex[:12]
     inicio = time.perf_counter()
     respuesta = await call_next(request)

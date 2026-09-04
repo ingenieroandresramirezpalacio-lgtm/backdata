@@ -21,6 +21,7 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.core.borrado_suave import marcar_eliminado_por
 from app.core.errores import ErrorDeValidacion, RecursoNoEncontrado
 from app.core.tiempo import hoy_local
 from app.modules.catalogos.models import Horno, Producto
@@ -342,34 +343,33 @@ def eliminar_orden(db: Session, orden: OrdenProduccion, usuario: Usuario) -> int
 
     Devuelve cuantos registros de horno/saborizado se llevo consigo.
     """
-    if orden.eliminado:
-        raise ErrorDeValidacion("Esta orden ya fue eliminada.")
-
-    ahora = datetime.now(UTC)
     arrastrados = 0
 
-    for registro in db.scalars(
+    registros_horno = db.scalars(
         select(RegistroHorno).where(
             RegistroHorno.orden_id == orden.id, RegistroHorno.eliminado == False
         )
-    ).unique():
-        registro.eliminado = True
-        registro.eliminado_por_id = usuario.id
-        registro.fecha_eliminacion = ahora
-        arrastrados += 1
-
-    for recepcion in db.scalars(
+    ).unique().all()
+    registros_saborizado = db.scalars(
         select(RegistroSaborizado).where(
             RegistroSaborizado.orden_id == orden.id, RegistroSaborizado.eliminado == False
         )
-    ).unique():
-        recepcion.eliminado = True
-        recepcion.eliminado_por_id = usuario.id
-        recepcion.fecha_eliminacion = ahora
-        arrastrados += 1
+    ).unique().all()
 
-    orden.eliminado = True
-    orden.eliminado_por_id = usuario.id
-    orden.fecha_eliminacion = ahora
+    for registro in registros_horno:
+        if not registro.eliminado:
+            registro.eliminado = True
+            registro.eliminado_por_id = usuario.id
+            registro.fecha_eliminacion = datetime.now(UTC)
+            arrastrados += 1
+
+    for recepcion in registros_saborizado:
+        if not recepcion.eliminado:
+            recepcion.eliminado = True
+            recepcion.eliminado_por_id = usuario.id
+            recepcion.fecha_eliminacion = datetime.now(UTC)
+            arrastrados += 1
+
+    marcar_eliminado_por(db, orden, usuario)
     db.commit()
     return arrastrados

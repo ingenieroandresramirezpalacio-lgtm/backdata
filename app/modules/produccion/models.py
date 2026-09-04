@@ -109,19 +109,19 @@ class OrdenProduccion(Base):
     supervisor_id: Mapped[int] = mapped_column(ForeignKey("usuarios.id"))
     # foreign_keys explicito: eliminado_por_id es una SEGUNDA llave foranea
     # a usuarios en esta misma tabla y SQLAlchemy no puede adivinar cual usar.
-    supervisor: Mapped["Usuario"] = relationship(foreign_keys=[supervisor_id], lazy="joined")
+    supervisor: Mapped["Usuario"] = relationship(foreign_keys=[supervisor_id], lazy="selectin")
 
     turno_id: Mapped[int] = mapped_column(ForeignKey("turnos.id"))
-    turno: Mapped["Turno"] = relationship(lazy="joined")
+    turno: Mapped["Turno"] = relationship(lazy="selectin")
 
     horno_id: Mapped[int] = mapped_column(ForeignKey("hornos.id"))
-    horno: Mapped["Horno"] = relationship(lazy="joined")
+    horno: Mapped["Horno"] = relationship(lazy="selectin")
 
     producto_id: Mapped[int] = mapped_column(ForeignKey("productos.id"))
-    producto: Mapped["Producto"] = relationship(lazy="joined")
+    producto: Mapped["Producto"] = relationship(lazy="selectin")
 
     categoria_id: Mapped[int] = mapped_column(ForeignKey("categorias_producto.id"))
-    categoria: Mapped["CategoriaProducto"] = relationship(lazy="joined")
+    categoria: Mapped["CategoriaProducto"] = relationship(lazy="selectin")
 
     # Siempre en kg: es lo que usa el resto del sistema. Si el pedido llego
     # en canastillas, aqui ya quedo convertido.
@@ -184,10 +184,10 @@ class RegistroHorno(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
 
     orden_id: Mapped[int] = mapped_column(ForeignKey("ordenes_produccion.id"))
-    orden: Mapped["OrdenProduccion"] = relationship(lazy="joined")
+    orden: Mapped["OrdenProduccion"] = relationship(lazy="selectin")
 
     usuario_id: Mapped[int] = mapped_column(ForeignKey("usuarios.id"))
-    usuario: Mapped["Usuario"] = relationship(foreign_keys=[usuario_id], lazy="joined")
+    usuario: Mapped["Usuario"] = relationship(foreign_keys=[usuario_id], lazy="selectin")
 
     hora_inicio: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     hora_fin: Mapped[datetime] = mapped_column(DateTime(timezone=True))
@@ -245,7 +245,7 @@ class Desperdicio(Base):
     registro_horno: Mapped["RegistroHorno"] = relationship(back_populates="desperdicios")
 
     tipo_desperdicio_id: Mapped[int] = mapped_column(ForeignKey("tipos_desperdicio.id"))
-    tipo_desperdicio: Mapped["TipoDesperdicio"] = relationship(lazy="joined")
+    tipo_desperdicio: Mapped["TipoDesperdicio"] = relationship(lazy="selectin")
 
     cantidad_kg: Mapped[Decimal] = mapped_column(Numeric(8, 2))
     observacion: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -262,21 +262,21 @@ class RegistroSaborizado(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
 
     orden_id: Mapped[int] = mapped_column(ForeignKey("ordenes_produccion.id"))
-    orden: Mapped["OrdenProduccion"] = relationship(lazy="joined")
+    orden: Mapped["OrdenProduccion"] = relationship(lazy="selectin")
 
     usuario_id: Mapped[int] = mapped_column(ForeignKey("usuarios.id"))
-    usuario: Mapped["Usuario"] = relationship(foreign_keys=[usuario_id], lazy="joined")
+    usuario: Mapped["Usuario"] = relationship(foreign_keys=[usuario_id], lazy="selectin")
 
     # Detectado automaticamente segun la hora de inicio: no se le pide al
     # operario.
     turno_id: Mapped[int] = mapped_column(ForeignKey("turnos.id"))
-    turno: Mapped["Turno"] = relationship(lazy="joined")
+    turno: Mapped["Turno"] = relationship(lazy="selectin")
 
     hora_inicio: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     hora_fin: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
     sabor_id: Mapped[int] = mapped_column(ForeignKey("sabores.id"))
-    sabor: Mapped["Sabor"] = relationship(lazy="joined")
+    sabor: Mapped["Sabor"] = relationship(lazy="selectin")
     cantidad_sabor_kg: Mapped[Decimal] = mapped_column(Numeric(8, 2))
 
     # Suma automatica de los pesos reales de las canastillas.

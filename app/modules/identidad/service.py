@@ -6,11 +6,10 @@ app/core/errores.py. Eso permite probarla sin levantar el servidor y
 reutilizarla desde otros modulos.
 """
 
-from datetime import UTC, datetime
-
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.borrado_suave import marcar_eliminado_por
 from app.core.errores import (
     ConflictoDeDatos,
     CredencialesInvalidas,
@@ -144,8 +143,6 @@ def eliminar_usuario(db: Session, usuario_id: int, eliminado_por: Usuario) -> No
     if usuario.id == eliminado_por.id:
         raise ErrorDeValidacion("No puedes eliminar tu propio usuario.")
 
-    usuario.eliminado = True
     usuario.activo = False
-    usuario.eliminado_por_id = eliminado_por.id
-    usuario.fecha_eliminacion = datetime.now(UTC)
+    marcar_eliminado_por(db, usuario, eliminado_por)
     db.commit()

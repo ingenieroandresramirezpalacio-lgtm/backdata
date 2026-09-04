@@ -17,9 +17,9 @@ from app.core.config import settings
 engine = create_engine(
     settings.database_url,
     pool_pre_ping=True,  # descarta conexiones muertas antes de usarlas
-    pool_size=10,
-    max_overflow=20,
-    pool_recycle=1800,  # renueva conexiones de más de 30 min
+    pool_size=settings.db_pool_size,
+    max_overflow=settings.db_max_overflow,
+    pool_recycle=settings.db_pool_recycle_segundos,  # renueva conexiones viejas
     echo=False,
 )
 
